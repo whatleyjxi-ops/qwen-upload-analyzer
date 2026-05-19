@@ -1,0 +1,15 @@
+[Unit]
+Description=Qwen Upload Analyzer FastAPI Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/qwen-upload-analyzer/backend
+EnvironmentFile=/opt/qwen-upload-analyzer/backend/.env
+ExecStart=python3 -m uvicorn app.main:app --host 127.0.0.1 --port 3000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
