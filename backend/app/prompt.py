@@ -1,11 +1,31 @@
-SYSTEM_PROMPT = "你是一个专业的文件内容分析助手。请根据用户上传的文件给出简洁、准确、可执行的分析。"
+from pathlib import Path
 
-USER_PROMPT = """
-请分析上传文件的主要内容，并按以下结构返回：
-1. 内容概览
-2. 关键发现
-3. 可能的风险或注意事项
-4. 建议的下一步
 
-不要输出 token 用量、费用统计、fps、max_pixels 或 total_pixels。
-""".strip()
+PROMPT_VERSION = "v2.2"
+PROMPT_FILE = Path(__file__).resolve().parent / "prompts" / "video_review_v2_2.md"
+PROMPT_SOURCE = "backend/app/prompts/video_review_v2_2.md"
+SYSTEM_PROMPT = PROMPT_FILE.read_text(encoding="utf-8")
+
+
+def build_user_instruction(category: str) -> str:
+    if category == "video":
+        return (
+            "请严格按照后端内置《视频AI审核框架 V2.2》审核本视频，"
+            "只输出有问题的时间段。"
+        )
+
+    if category == "image":
+        return (
+            "当前上传的是图片，不能编造视频时间戳，只能参考画面审核标准。"
+            "请基于后端内置审核框架中适用于画面内容的标准进行审核，"
+            "只输出与图片内容相关的审核结果。"
+        )
+
+    if category == "document":
+        return (
+            "当前上传的是文档，不能编造视频内容。"
+            "请基于后端内置审核框架中可适用于文本内容的标准进行审核，"
+            "如果无法读取文档内容，请明确说明限制，不要虚构内容。"
+        )
+
+    return "请根据后端内置审核标准分析用户上传内容，只输出审核结果。"

@@ -3,7 +3,7 @@ from openai import OpenAI
 
 from app.config import Settings
 from app.oss_service import UploadedFileRef
-from app.prompt import SYSTEM_PROMPT, USER_PROMPT
+from app.prompt import PROMPT_SOURCE, PROMPT_VERSION, SYSTEM_PROMPT, build_user_instruction
 from app.validate import UploadCategory
 
 
@@ -40,6 +40,9 @@ async def analyze_files(
         "file_count": len(files),
         "files": [file.to_response() for file in files],
         "result": content,
+        "promptApplied": True,
+        "promptSource": PROMPT_SOURCE,
+        "promptVersion": PROMPT_VERSION,
     }
 
 
@@ -50,6 +53,9 @@ def _mock_result(category: UploadCategory, files: list[UploadedFileRef]) -> dict
         "category": category.value,
         "file_count": len(files),
         "files": [file.to_response() for file in files],
+        "promptApplied": True,
+        "promptSource": PROMPT_SOURCE,
+        "promptVersion": PROMPT_VERSION,
         "result": (
             "这是 MOCK_QWEN=true 下的模拟分析结果。\n\n"
             f"已接收 {len(files)} 个{_category_label(category)}文件：{', '.join(names)}。\n"
@@ -64,7 +70,7 @@ def _build_messages(
     category: UploadCategory,
     files: list[UploadedFileRef],
 ) -> list[dict]:
-    content: list[dict] = [{"type": "text", "text": USER_PROMPT}]
+    content: list[dict] = [{"type": "text", "text": build_user_instruction(category.value)}]
 
     for file in files:
         url = file.qwen_url

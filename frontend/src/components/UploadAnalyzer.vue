@@ -31,6 +31,8 @@
               <span>{{ categoryLabel(result.analysis.category) }}</span>
               <span>{{ result.analysis.file_count }} 个文件</span>
               <span>{{ result.analysis.mode === 'mock' ? 'Mock' : 'Qwen' }}</span>
+              <span v-if="result.analysis.promptApplied">已应用后端预设提示词</span>
+              <span v-if="result.analysis.promptVersion">promptVersion: {{ result.analysis.promptVersion }}</span>
             </div>
             <div class="result-actions">
               <span v-if="copyNotice" class="copy-notice" :class="{ 'copy-notice-error': copyFailed }">
