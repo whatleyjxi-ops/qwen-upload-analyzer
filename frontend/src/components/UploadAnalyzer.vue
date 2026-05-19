@@ -14,7 +14,10 @@
       <section class="result-area" aria-live="polite">
         <div v-if="isLoading" class="loading-state">
           <span class="spinner" aria-hidden="true"></span>
-          <span>正在分析...</span>
+          <div class="loading-copy">
+            <strong>{{ loadingStage }}</strong>
+            <span v-if="slowHint">{{ slowHint }}</span>
+          </div>
         </div>
 
         <div v-else-if="error" class="message error-message">
@@ -22,13 +25,36 @@
         </div>
 
         <div v-else-if="result" class="message result-message">
-          <div class="result-meta">
-            <span>{{ categoryLabel(result.analysis.category) }}</span>
-            <span>{{ result.analysis.file_count }} 个文件</span>
-            <span>{{ result.analysis.mode === 'mock' ? 'Mock' : 'Qwen' }}</span>
+          <div class="result-header">
+            <div class="result-meta">
+              <span>分析完成</span>
+              <span>{{ categoryLabel(result.analysis.category) }}</span>
+              <span>{{ result.analysis.file_count }} 个文件</span>
+              <span>{{ result.analysis.mode === 'mock' ? 'Mock' : 'Qwen' }}</span>
+            </div>
+            <div class="result-actions">
+              <span v-if="copyNotice" class="copy-notice" :class="{ 'copy-notice-error': copyFailed }">
+                {{ copyNotice }}
+              </span>
+              <button type="button" :disabled="!hasAnalysisResult" @click="copyAnalysisResult">
+                复制结果
+              </button>
+              <button type="button" :disabled="!hasAnalysisResult" @click="downloadAnalysis('md')">
+                下载 MD
+              </button>
+              <button type="button" :disabled="!hasAnalysisResult" @click="downloadAnalysis('txt')">
+                下载 TXT
+              </button>
+            </div>
+          </div>
+          <div v-if="debugTiming" class="timing-info">
+            <span>保存耗时：{{ formatSeconds(debugTiming.saveSeconds) }}</span>
+            <span v-if="debugTiming.ossSeconds > 0">OSS 上传耗时：{{ formatSeconds(debugTiming.ossSeconds) }}</span>
+            <span>模型分析耗时：{{ formatSeconds(debugTiming.qwenSeconds) }}</span>
+            <span>总耗时：{{ formatSeconds(debugTiming.totalSeconds) }}</span>
           </div>
           <div v-if="hasOssFile" class="debug-info">已使用 OSS 文件地址</div>
-          <pre>{{ result.analysis.result }}</pre>
+          <pre>{{ formattedAnalysisResult }}</pre>
         </div>
 
         <div v-else class="empty-state">
@@ -128,13 +154,23 @@ const fileInput = ref(null)
 const category = ref('document')
 const isMenuOpen = ref(false)
 const isLoading = ref(false)
+const loadingStage = ref('正在上传文件...')
+const slowHint = ref('')
+const stageTimers = []
+let copyNoticeTimer = 0
 const error = ref('')
 const result = ref(null)
+const completedAt = ref('')
+const copyNotice = ref('')
+const copyFailed = ref(false)
 
 const activeConfig = computed(() => uploadConfigs[category.value])
+const debugTiming = computed(() => result.value?.debugTiming || null)
 const hasOssFile = computed(() =>
   Boolean(result.value?.analysis?.files?.some((file) => file.ossUrl || file.signedUrl)),
 )
+const formattedAnalysisResult = computed(() => formatResultContent(result.value?.analysis?.result))
+const hasAnalysisResult = computed(() => Boolean(result.value && formattedAnalysisResult.value))
 
 function chooseUpload(nextCategory) {
   category.value = nextCategory
@@ -152,18 +188,25 @@ async function handleFiles(event) {
   if (validationError) {
     error.value = validationError
     result.value = null
+    completedAt.value = ''
     return
   }
 
   isLoading.value = true
   error.value = ''
   result.value = null
+  completedAt.value = ''
+  clearCopyNotice()
+  startStageTimers()
 
   try {
     result.value = await analyzeUpload(category.value, files)
+    completedAt.value = new Date().toISOString()
+    loadingStage.value = '分析完成'
   } catch (caughtError) {
     error.value = caughtError.message
   } finally {
+    stopStageTimers()
     isLoading.value = false
   }
 }
@@ -181,9 +224,42 @@ function validateSelectedFiles(files) {
   return ''
 }
 
+function startStageTimers() {
+  stopStageTimers()
+  loadingStage.value = '正在上传文件...'
+  slowHint.value = ''
+  stageTimers.push(
+    window.setTimeout(() => {
+      loadingStage.value = '正在等待后端保存...'
+    }, 600),
+    window.setTimeout(() => {
+      loadingStage.value = '正在分析中...'
+    }, 1800),
+    window.setTimeout(() => {
+      slowHint.value = '视频文件较大，分析可能需要更久，请不要关闭页面。'
+    }, 10000),
+    window.setTimeout(() => {
+      slowHint.value = '仍在分析中，长视频或大文件会消耗更长时间。'
+    }, 30000),
+  )
+}
+
+function stopStageTimers() {
+  while (stageTimers.length) {
+    window.clearTimeout(stageTimers.pop())
+  }
+}
+
 function clearResult() {
   error.value = ''
   result.value = null
+  completedAt.value = ''
+  clearCopyNotice()
+}
+
+function formatSeconds(value) {
+  const seconds = Number(value || 0)
+  return `${seconds.toFixed(3)} 秒`
 }
 
 function categoryLabel(value) {
@@ -192,5 +268,177 @@ function categoryLabel(value) {
     video: '视频',
     document: '文档',
   }[value] || value
+}
+
+async function copyAnalysisResult() {
+  if (!hasAnalysisResult.value) return
+
+  try {
+    await writeClipboard(formattedAnalysisResult.value)
+    showCopyNotice('已复制', false)
+  } catch {
+    showCopyNotice('复制失败', true)
+  }
+}
+
+async function writeClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  document.body.removeChild(textarea)
+
+  if (!copied) {
+    throw new Error('copy failed')
+  }
+}
+
+function downloadAnalysis(type) {
+  if (!hasAnalysisResult.value) return
+
+  const content = type === 'md' ? buildMarkdownContent() : buildTextContent()
+  const mimeType = type === 'md' ? 'text/markdown;charset=utf-8' : 'text/plain;charset=utf-8'
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = buildDownloadFilename(type)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+function buildDownloadFilename(type) {
+  const analysis = result.value?.analysis || {}
+  const safeCategory = (analysis.category || category.value || 'unknown').toString().replace(/[^a-z0-9_-]/gi, '-')
+  return `qwen-analysis-${safeCategory}-${formatTimestampForFilename(new Date())}.${type}`
+}
+
+function buildMarkdownContent() {
+  const analysis = result.value?.analysis || {}
+  const lines = [
+    '# Qwen 分析结果',
+    '',
+    `- 分析时间：${formatDisplayTime(completedAt.value)}`,
+    `- 上传类型：${categoryLabel(analysis.category)}`,
+    '',
+    '## 文件列表',
+    '',
+    ...formatFileList(analysis.files, '- '),
+    '',
+    '## 分析结果正文',
+    '',
+    wrapMarkdownResult(formattedAnalysisResult.value),
+  ]
+
+  if (debugTiming.value) {
+    lines.push('', '## debugTiming', '', '```json', JSON.stringify(debugTiming.value, null, 2), '```')
+  }
+
+  return `${lines.join('\n')}\n`
+}
+
+function buildTextContent() {
+  const analysis = result.value?.analysis || {}
+  const lines = [
+    'Qwen 分析结果',
+    '',
+    `分析时间：${formatDisplayTime(completedAt.value)}`,
+    `上传类型：${categoryLabel(analysis.category)}`,
+    '',
+    '文件列表：',
+    ...formatFileList(analysis.files, ''),
+    '',
+    '分析结果正文：',
+    formattedAnalysisResult.value,
+  ]
+
+  if (debugTiming.value) {
+    lines.push('', 'debugTiming：', JSON.stringify(debugTiming.value, null, 2))
+  }
+
+  return `${lines.join('\n')}\n`
+}
+
+function formatFileList(files, prefix) {
+  if (!Array.isArray(files) || files.length === 0) {
+    return [`${prefix}无文件信息`]
+  }
+
+  return files.map((file, index) => {
+    const name = file?.name || file?.filename || `文件 ${index + 1}`
+    const url = file?.ossUrl || file?.signedUrl || file?.url || ''
+    return `${prefix}${url ? `${name} (${url})` : name}`
+  })
+}
+
+function formatResultContent(value) {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'object') return JSON.stringify(value, null, 2)
+  const text = String(value)
+  const trimmed = text.trim()
+  if (!trimmed) return ''
+
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2)
+  } catch {
+    return text
+  }
+}
+
+function wrapMarkdownResult(text) {
+  const trimmed = text.trim()
+  if (looksLikeJson(trimmed)) {
+    return `\`\`\`json\n${trimmed}\n\`\`\``
+  }
+  return text.replaceAll('```', '\\`\\`\\`')
+}
+
+function looksLikeJson(text) {
+  return (text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'))
+}
+
+function formatDisplayTime(value) {
+  const date = value ? new Date(value) : new Date()
+  return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+function formatTimestampForFilename(date) {
+  const pad = (value) => String(value).padStart(2, '0')
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    '-',
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds()),
+  ].join('')
+}
+
+function showCopyNotice(message, isError) {
+  clearCopyNotice()
+  copyNotice.value = message
+  copyFailed.value = isError
+  copyNoticeTimer = window.setTimeout(clearCopyNotice, 1800)
+}
+
+function clearCopyNotice() {
+  if (copyNoticeTimer) {
+    window.clearTimeout(copyNoticeTimer)
+    copyNoticeTimer = 0
+  }
+  copyNotice.value = ''
+  copyFailed.value = false
 }
 </script>

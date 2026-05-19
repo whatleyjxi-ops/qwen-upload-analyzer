@@ -1,4 +1,6 @@
 from pathlib import Path
+import logging
+import time
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, UploadFile
@@ -18,6 +20,8 @@ from app.validate import UploadCategory, validate_uploads
 
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("qwen-upload-analyzer")
 
 app = FastAPI(title="qwen-upload-analyzer")
 
@@ -47,18 +51,57 @@ async def analyze_upload(
     category: UploadCategory = Form(...),
     files: list[UploadFile] = File(...),
 ) -> dict:
+    total_started = time.perf_counter()
+    save_seconds = 0.0
+    oss_seconds = 0.0
+    qwen_seconds = 0.0
     settings = get_settings()
     valid_files = validate_uploads(category, files)
+    file_count = len(valid_files)
+
+    save_started = time.perf_counter()
     saved_files = await _save_files(valid_files)
+    save_seconds = time.perf_counter() - save_started
+    total_file_size = sum(path.stat().st_size for path in saved_files)
+
+    refs_started = time.perf_counter()
     file_refs = _build_file_refs(saved_files, settings)
+    if settings.storage_mode.lower() == "oss":
+        oss_seconds = time.perf_counter() - refs_started
+
+    qwen_started = time.perf_counter()
     analysis = await analyze_files(
         category=category,
         files=file_refs,
         settings=settings,
     )
+    qwen_seconds = time.perf_counter() - qwen_started
+    total_seconds = time.perf_counter() - total_started
+    debug_timing = {
+        "saveSeconds": round(save_seconds, 3),
+        "ossSeconds": round(oss_seconds, 3),
+        "qwenSeconds": round(qwen_seconds, 3),
+        "totalSeconds": round(total_seconds, 3),
+    }
+
+    logger.info(
+        "upload analysis timing saveSeconds=%.3f ossSeconds=%.3f qwenSeconds=%.3f "
+        "totalSeconds=%.3f fileCount=%s totalFileSize=%s category=%s mockQwen=%s storageMode=%s",
+        save_seconds,
+        oss_seconds,
+        qwen_seconds,
+        total_seconds,
+        file_count,
+        total_file_size,
+        category.value,
+        settings.mock_qwen,
+        settings.storage_mode,
+    )
+
     return {
         "status": "ok",
         "analysis": analysis,
+        "debugTiming": debug_timing,
     }
 
 
