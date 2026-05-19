@@ -14,6 +14,13 @@ class Settings(BaseSettings):
     qwen_model: str = "qwen3.6-plus"
     mock_qwen: bool = True
     public_file_base_url: str = ""
+    storage_mode: str = "local"
+    oss_access_key_id: str = ""
+    oss_access_key_secret: str = ""
+    oss_endpoint: str = ""
+    oss_bucket: str = ""
+    oss_object_prefix: str = "qwen-upload-analyzer"
+    oss_signed_url_expire_seconds: int = 3600
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",

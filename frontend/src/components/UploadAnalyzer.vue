@@ -27,6 +27,7 @@
             <span>{{ result.analysis.file_count }} 个文件</span>
             <span>{{ result.analysis.mode === 'mock' ? 'Mock' : 'Qwen' }}</span>
           </div>
+          <div v-if="hasOssFile" class="debug-info">已使用 OSS 文件地址</div>
           <pre>{{ result.analysis.result }}</pre>
         </div>
 
@@ -131,6 +132,9 @@ const error = ref('')
 const result = ref(null)
 
 const activeConfig = computed(() => uploadConfigs[category.value])
+const hasOssFile = computed(() =>
+  Boolean(result.value?.analysis?.files?.some((file) => file.ossUrl || file.signedUrl)),
+)
 
 function chooseUpload(nextCategory) {
   category.value = nextCategory

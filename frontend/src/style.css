@@ -152,6 +152,12 @@ h1 {
   border: 1px solid #e5e5e5;
 }
 
+.debug-info {
+  margin: 0 0 12px;
+  color: #0e7c61;
+  font-size: 13px;
+}
+
 pre {
   margin: 0;
   white-space: pre-wrap;

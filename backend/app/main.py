@@ -5,7 +5,14 @@ from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.config import UPLOAD_DIR, get_settings
+from app.config import Settings, UPLOAD_DIR, get_settings
+from app.oss_service import (
+    UploadedFileRef,
+    build_local_file_ref,
+    is_oss_configured,
+    require_oss_config,
+    upload_file_to_oss,
+)
 from app.qwen_service import analyze_files
 from app.validate import UploadCategory, validate_uploads
 
@@ -40,12 +47,14 @@ async def analyze_upload(
     category: UploadCategory = Form(...),
     files: list[UploadFile] = File(...),
 ) -> dict:
+    settings = get_settings()
     valid_files = validate_uploads(category, files)
     saved_files = await _save_files(valid_files)
+    file_refs = _build_file_refs(saved_files, settings)
     analysis = await analyze_files(
         category=category,
-        saved_files=saved_files,
-        settings=get_settings(),
+        files=file_refs,
+        settings=settings,
     )
     return {
         "status": "ok",
@@ -63,3 +72,14 @@ async def _save_files(files: list[UploadFile]) -> list[Path]:
                 output.write(chunk)
         saved.append(target)
     return saved
+
+
+def _build_file_refs(saved_files: list[Path], settings: Settings) -> list[UploadedFileRef]:
+    storage_mode = settings.storage_mode.lower()
+    if storage_mode == "oss":
+        if settings.mock_qwen and not is_oss_configured(settings):
+            return [build_local_file_ref(path, settings.public_file_base_url) for path in saved_files]
+        require_oss_config(settings)
+        return [upload_file_to_oss(path, settings) for path in saved_files]
+
+    return [build_local_file_ref(path, settings.public_file_base_url) for path in saved_files]
